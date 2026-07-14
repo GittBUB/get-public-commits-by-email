@@ -14,7 +14,7 @@ Documentation for the API used:
 NOTE: When a user enables "Keep my email address private," GitHub gives them a noreply address like 12345678+username@users.noreply.github.com (or the older username@users.noreply.github.com). If they also enable "Block command line pushes that expose my email," their commits get authored under that noreply address, not their real one. So author-email:their.real@email.com will return nothing for those commits — the real email was never written into the commit object.
 
 ### get-public-repos-by-email
-Leverage GitHub APIS to identify public repos by email address.
+Leverage GitHub APIS to identify public repos and gists by email address.
 
 Just fill in TOKEN, EMAILS, and COMPANY_ORG, then run python get-public-repos-by-email.py.
 
