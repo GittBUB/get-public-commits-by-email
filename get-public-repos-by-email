@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""
+Given a list of COMPANY email addresses, discover whether each maps to a
+personal GitHub account, and list that account's public repos OUTSIDE your org.
+
+Pipeline
+--------
+1. Identify the account behind each company email:
+     a) commit search across all of GitHub (author-email OR committer-email);
+        each hit exposes author.login / committer.login = the linked account.
+     b) user search by public profile email (email in:email).
+2. For every discovered account, pull its public repos: GET /users/{login}/repos
+3. Flag repos NOT owned by one of your company orgs => personal / outside repos.
+
+APIs used (docs)
+----------------
+  Search commits:  https://docs.github.com/en/rest/search/search#search-commits
+  Commit syntax:   https://docs.github.com/en/search-github/searching-on-github/searching-commits
+  Search users:    https://docs.github.com/en/rest/search/search#search-users
+  List user repos: https://docs.github.com/en/rest/repos/repos#list-repositories-for-a-user
+  Get a user:      https://docs.github.com/en/rest/users/users#get-a-user
+
+Known blind spots (see notes at bottom)
+---------------------------------------
+  - Email privacy / noreply addresses hide the company email from commits.
+  - Only PUBLIC repos and PUBLIC commit associations are visible via the API.
+  - author.login can be null when GitHub can't link the commit to an account.
+"""
+
+import requests, time, csv
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+TOKEN         = "ghp_xxx"                       # PAT with repo + read:user + search
+EMAILS        = ["alice@company.com", "bob@company.com"]   # or load from a file
+COMPANY_ORGS  = ["my-company", "my-company-labs"]          # orgs to treat as "internal"
+
+INCLUDE_FORKS = False   # set True to also list forked repos as personal repos
+
+# ---------------------------------------------------------------------------
+session = requests.Session()
+session.headers.update({
+    "Authorization": f"Bearer {TOKEN}",
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+})
+COMPANY_ORGS_LC = {o.lower() for o in COMPANY_ORGS}
+
+
+def get(url, params=None):
+    """GET with search rate-limit + secondary-limit backoff."""
+    while True:
+        r = session.get(url, params=params)
+        if r.status_code in (403, 429) and r.headers.get("X-RateLimit-Remaining") == "0":
+            reset = int(r.headers.get("X-RateLimit-Reset", time.time() + 60))
+            time.sleep(max(reset - time.time(), 0) + 1)
+            continue
+        if r.status_code == 403 and "secondary rate limit" in r.text.lower():
+            time.sleep(60)
+            continue
+        r.raise_for_status()
+        return r
+
+
+def accounts_from_commits(email):
+    """Return {login: sample_repo} for accounts linked to commits using this email."""
+    found = {}
+    q = f"author-email:{email} OR committer-email:{email}"
+    page = 1
+    while page <= 10:  # 1,000-result cap = 10 pages of 100
+        r = get("https://api.github.com/search/commits",
+                params={"q": q, "per_page": 100, "page": page})
+        items = r.json().get("items", [])
+        for c in items:
+            for who in ("author", "committer"):
+                u = c.get(who)
+                if u and u.get("login"):
+                    found.setdefault(u["login"], c["repository"]["full_name"])
+        if len(items) < 100:
+            break
+        page += 1
+        time.sleep(2)   # search API ~30 req/min
+    return found
+
+
+def accounts_from_user_search(email):
+    """Accounts whose PUBLIC profile email matches (only public emails are indexed)."""
+    r = get("https://api.github.com/search/users",
+            params={"q": f"{email} in:email", "per_page": 100})
+    return [u["login"] for u in r.json().get("items", [])]
+
+
+def user_repos(login):
+    """All public repos owned by a user (paginated)."""
+    repos, page = [], 1
+    while True:
+        r = get(f"https://api.github.com/users/{login}/repos",
+                params={"per_page": 100, "page": page, "type": "owner", "sort": "updated"})
+        batch = r.json()
+        repos.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return repos
+
+
+def profile(login):
+    return get(f"https://api.github.com/users/{login}").json()
+
+
+def main():
+    rows = []
+    for email in EMAILS:
+        logins = set(accounts_from_commits(email))
+        logins |= set(accounts_from_user_search(email))
+
+        if not logins:
+            rows.append([email, "", "", "", "NO ACCOUNT FOUND", ""])
+            continue
+
+        for login in sorted(logins):
+            p = profile(login)
+            outside = [
+                repo for repo in user_repos(login)
+                if repo["owner"]["login"].lower() not in COMPANY_ORGS_LC
+                and (INCLUDE_FORKS or not repo["fork"])
+            ]
+            if not outside:
+                rows.append([email, login, p.get("name") or "", p.get("company") or "",
+                             "no outside repos", ""])
+            for repo in outside:
+                rows.append([
+                    email, login, p.get("name") or "", p.get("company") or "",
+                    repo["full_name"] + ("  [fork]" if repo["fork"] else ""),
+                    repo["html_url"],
+                ])
+            time.sleep(1)
+
+    with open("personal_accounts.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["company_email", "github_login", "profile_name",
+                    "profile_company", "outside_repo", "repo_url"])
+        w.writerows(rows)
+
+    print(f"done -> personal_accounts.csv  ({len(rows)} rows)")
+
+
+if __name__ == "__main__":
+    main()
