@@ -18,7 +18,11 @@ APIs used (docs)
   Commit syntax:   https://docs.github.com/en/search-github/searching-on-github/searching-commits
   Search users:    https://docs.github.com/en/rest/search/search#search-users
   List user repos: https://docs.github.com/en/rest/repos/repos#list-repositories-for-a-user
+  List user gists: https://docs.github.com/en/rest/gists/gists#list-gists-for-a-user
   Get a user:      https://docs.github.com/en/rest/users/users#get-a-user
+
+Note: gists are NOT searchable by email (no gist-search API, and commit search
+does not cover gists). They are found only by pivoting off a discovered account.
 
 Known blind spots (see notes at bottom)
 ---------------------------------------
@@ -105,6 +109,20 @@ def user_repos(login):
     return repos
 
 
+def user_gists(login):
+    """All public gists owned by a user (paginated)."""
+    gists, page = [], 1
+    while True:
+        r = get(f"https://api.github.com/users/{login}/gists",
+                params={"per_page": 100, "page": page})
+        batch = r.json()
+        gists.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return gists
+
+
 def profile(login):
     return get(f"https://api.github.com/users/{login}").json()
 
@@ -116,31 +134,43 @@ def main():
         logins |= set(accounts_from_user_search(email))
 
         if not logins:
-            rows.append([email, "", "", "", "NO ACCOUNT FOUND", ""])
+            rows.append([email, "", "", "", "", "NO ACCOUNT FOUND", ""])
             continue
 
         for login in sorted(logins):
             p = profile(login)
+            name, company = p.get("name") or "", p.get("company") or ""
+
+            # --- outside repos ---
             outside = [
                 repo for repo in user_repos(login)
                 if repo["owner"]["login"].lower() not in COMPANY_ORGS_LC
                 and (INCLUDE_FORKS or not repo["fork"])
             ]
             if not outside:
-                rows.append([email, login, p.get("name") or "", p.get("company") or "",
-                             "no outside repos", ""])
+                rows.append([email, login, name, company, "repo", "no outside repos", ""])
             for repo in outside:
                 rows.append([
-                    email, login, p.get("name") or "", p.get("company") or "",
+                    email, login, name, company, "repo",
                     repo["full_name"] + ("  [fork]" if repo["fork"] else ""),
                     repo["html_url"],
                 ])
+
+            # --- public gists ---
+            gists = user_gists(login)
+            if not gists:
+                rows.append([email, login, name, company, "gist", "no public gists", ""])
+            for g in gists:
+                first_file = next(iter(g.get("files", {})), "")
+                desc = (g.get("description") or first_file or "").replace("\n", " ")[:80]
+                rows.append([email, login, name, company, "gist", desc, g["html_url"]])
+
             time.sleep(1)
 
     with open("personal_accounts.csv", "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["company_email", "github_login", "profile_name",
-                    "profile_company", "outside_repo", "repo_url"])
+                    "profile_company", "kind", "item", "url"])
         w.writerows(rows)
 
     print(f"done -> personal_accounts.csv  ({len(rows)} rows)")
