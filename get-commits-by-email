@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""
+Search GitHub commits by a list of author emails, optionally within a date range.
+
+Uses the GitHub REST "search commits" endpoint:
+  https://api.github.com/search/commits
+
+Docs:
+  - Search commits API:  https://docs.github.com/en/rest/search/search#search-commits
+  - Commit search syntax: https://docs.github.com/en/search-github/searching-on-github/searching-commits
+
+Limits to be aware of:
+  - Max 5 boolean operators (AND/OR/NOT) per query  -> up to ~6 emails per chunk
+  - Query keyword content limited to 256 characters
+  - Max 1,000 results returned per query
+  - Search API rate limit: ~30 requests/min (authenticated)
+"""
+
+import requests, time, csv
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+TOKEN  = "ghp_xxx"                       # PAT with repo + search access
+EMAILS = ["a@x.com", "b@x.com", "c@x.com"]  # or load from a file
+
+SCOPE  = ""                              # e.g. "repo:owner/name" or "org:myorg"; "" = all GitHub
+
+# Date range filter. Uses author-date (when the code was written).
+# Swap to "committer-date" if you care about when it was applied/rebased.
+#   "2025-01-01..2025-06-30"  between two dates (inclusive)
+#   ">2025-01-01"             after
+#   "2025-01-01..*"           from a date onward
+#   "*..2025-06-30"           up to a date
+#   ""                        no date filter
+DATE_FIELD = "author-date"
+DATE_RANGE = "2025-01-01..2025-06-30"    # set to "" to disable
+
+CHUNK = 5   # emails per query (5 = safe under the 5-operator/256-char limits with a date filter)
+
+# ---------------------------------------------------------------------------
+session = requests.Session()
+session.headers.update({
+    "Authorization": f"Bearer {TOKEN}",
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+})
+
+
+def chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+
+def build_query(emails):
+    q = "(" + " OR ".join(f"author-email:{e}" for e in emails) + ")"
+    if SCOPE:
+        q = f"{SCOPE} {q}"
+    if DATE_RANGE:
+        q = f"{q} {DATE_FIELD}:{DATE_RANGE}"
+    return q
+
+
+def search(emails):
+    q = build_query(emails)
+    page, out = 1, []
+    while True:
+        r = session.get(
+            "https://api.github.com/search/commits",
+            params={"q": q, "per_page": 100, "page": page},
+        )
+        # Rate-limit backoff
+        if r.status_code == 403 and r.headers.get("X-RateLimit-Remaining") == "0":
+            reset = int(r.headers["X-RateLimit-Reset"])
+            time.sleep(max(reset - time.time(), 0) + 1)
+            continue
+        r.raise_for_status()
+        data = r.json()
+        items = data.get("items", [])
+        out.extend(items)
+        if data.get("total_count", 0) > 1000 and page * 100 >= 1000:
+            print(f"  ! query hit the 1,000-result cap; narrow SCOPE or DATE_RANGE: {q}")
+            break
+        if len(items) < 100:
+            break
+        page += 1
+        time.sleep(2)   # stay under ~30 req/min
+    return out
+
+
+def main():
+    with open("commits.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["repo", "sha", "author_email", "author_date", "message", "url"])
+        for group in chunks(EMAILS, CHUNK):
+            for c in search(group):
+                w.writerow([
+                    c["repository"]["full_name"],
+                    c["sha"],
+                    c["commit"]["author"]["email"],
+                    c["commit"]["author"]["date"],
+                    c["commit"]["message"].splitlines()[0],
+                    c["html_url"],
+                ])
+            time.sleep(2)
+    print("done -> commits.csv")
+
+
+if __name__ == "__main__":
+    main()
