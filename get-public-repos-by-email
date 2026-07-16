@@ -36,7 +36,7 @@ import requests, time, csv
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-TOKEN         = "ghp_xxx"                      # PAT with repo + read:user + search
+TOKEN         = "ghp_xxx"                       # PAT with repo + read:user + search
 EMAILS        = ["gittbub@github.com"]   # or load from a file
 COMPANY_ORGS  = ["github"]          # orgs to treat as "internal"
 

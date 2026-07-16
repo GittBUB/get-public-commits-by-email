@@ -22,7 +22,7 @@ import requests, time, csv
 # Config
 # ---------------------------------------------------------------------------
 TOKEN  = "ghp_xxx"                       # PAT with repo + search access
-EMAILS = ["a@x.com", "b@x.com", "c@x.com"]  # or load from a file
+EMAILS = ["gittbub@github.com"]  # or load from a file
 
 SCOPE  = ""                              # e.g. "repo:owner/name" or "org:myorg"; "" = all GitHub
 
@@ -34,7 +34,7 @@ SCOPE  = ""                              # e.g. "repo:owner/name" or "org:myorg"
 #   "*..2025-06-30"           up to a date
 #   ""                        no date filter
 DATE_FIELD = "author-date"
-DATE_RANGE = "2025-01-01..2025-06-30"    # set to "" to disable
+DATE_RANGE = ""    # set to "" to disable
 
 CHUNK = 5   # emails per query (5 = safe under the 5-operator/256-char limits with a date filter)
 
@@ -53,7 +53,11 @@ def chunks(lst, n):
 
 
 def build_query(emails):
-    q = "(" + " OR ".join(f"author-email:{e}" for e in emails) + ")"
+    # Only use parentheses when grouping multiple emails with OR
+    if len(emails) == 1:
+        q = f"author-email:{emails[0]}"
+    else:
+        q = " OR ".join(f"author-email:{e}" for e in emails)
     if SCOPE:
         q = f"{SCOPE} {q}"
     if DATE_RANGE:
