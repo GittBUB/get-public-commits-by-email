@@ -2,6 +2,40 @@
 
 This repo contains the following scripts:
 
+---
+
+## Setting Up a Personal Access Token (PAT)
+
+Both scripts authenticate to the GitHub API using a **classic Personal Access Token (PAT)**. Fine-grained tokens are not recommended here because these scripts search across all of public GitHub rather than a specific set of repositories.
+
+### Steps to create a classic PAT
+
+1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)**.
+   Direct link: https://github.com/settings/tokens
+2. Click **Generate new token (classic)**.
+3. Give it a descriptive **Note** (e.g. `public-commit-search`).
+4. Set an **Expiration** appropriate for your use case.
+5. Select the **scopes** listed below for the script you are running.
+6. Click **Generate token** and copy the value — it will not be shown again.
+7. Paste the token into the `TOKEN = "ghp_xxx"` line at the top of the script.
+
+### Required scopes by script
+
+| Script | Required scopes | Why |
+|---|---|---|
+| `get-commits-by-email` | `public_repo` | Authenticates search-commits API requests and raises the rate limit to ~30 req/min |
+| `get-public-repos-by-email` | `public_repo`, `read:user` | `public_repo` for commit/repo search; `read:user` for the `/users/{login}` profile endpoint |
+
+> **Note:** The search endpoints work without any scopes, but an unauthenticated request is rate-limited to 10 requests/minute and results may be degraded. Always use a PAT.
+
+### Security reminders
+
+* **Never commit your PAT to source control.** The placeholder `ghp_xxx` must be replaced at runtime only.
+* Store the token in an environment variable or a secrets manager and read it in the script (e.g. `TOKEN = os.environ["GITHUB_TOKEN"]`) rather than hard-coding it.
+* Revoke tokens you no longer need at https://github.com/settings/tokens.
+
+---
+
 ### get-public-commits-by-email
 Leverage GitHub APIs to identify public commits by email address.
 
