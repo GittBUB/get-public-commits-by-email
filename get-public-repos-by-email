@@ -36,9 +36,9 @@ import requests, time, csv
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-TOKEN         = "ghp_xxx"                       # PAT with repo + read:user + search
-EMAILS        = ["alice@company.com", "bob@company.com"]   # or load from a file
-COMPANY_ORGS  = ["my-company", "my-company-labs"]          # orgs to treat as "internal"
+TOKEN         = "ghp_xxx"                      # PAT with repo + read:user + search
+EMAILS        = ["gittbub@github.com"]   # or load from a file
+COMPANY_ORGS  = ["github"]          # orgs to treat as "internal"
 
 INCLUDE_FORKS = False   # set True to also list forked repos as personal repos
 
@@ -70,21 +70,22 @@ def get(url, params=None):
 def accounts_from_commits(email):
     """Return {login: sample_repo} for accounts linked to commits using this email."""
     found = {}
-    q = f"author-email:{email} OR committer-email:{email}"
-    page = 1
-    while page <= 10:  # 1,000-result cap = 10 pages of 100
-        r = get("https://api.github.com/search/commits",
-                params={"q": q, "per_page": 100, "page": page})
-        items = r.json().get("items", [])
-        for c in items:
-            for who in ("author", "committer"):
-                u = c.get(who)
-                if u and u.get("login"):
-                    found.setdefault(u["login"], c["repository"]["full_name"])
-        if len(items) < 100:
-            break
-        page += 1
-        time.sleep(2)   # search API ~30 req/min
+    # Search author-email and committer-email separately (OR not supported well)
+    for qualifier in [f'author-email:{email}', f'committer-email:{email}']:
+        page = 1
+        while page <= 10:  # 1,000-result cap = 10 pages of 100
+            r = get("https://api.github.com/search/commits",
+                    params={"q": qualifier, "per_page": 100, "page": page})
+            items = r.json().get("items", [])
+            for c in items:
+                for who in ("author", "committer"):
+                    u = c.get(who)
+                    if u and u.get("login"):
+                        found.setdefault(u["login"], c["repository"]["full_name"])
+            if len(items) < 100:
+                break
+            page += 1
+            time.sleep(2)   # search API ~30 req/min
     return found
 
 
@@ -124,7 +125,11 @@ def user_gists(login):
 
 
 def profile(login):
-    return get(f"https://api.github.com/users/{login}").json()
+    r = session.get(f"https://api.github.com/users/{login}")
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.json()
 
 
 def main():
@@ -139,6 +144,9 @@ def main():
 
         for login in sorted(logins):
             p = profile(login)
+            if p is None:
+                rows.append([email, login, "", "", "", "USER NOT FOUND (deleted?)", ""])
+                continue
             name, company = p.get("name") or "", p.get("company") or ""
 
             # --- outside repos ---
