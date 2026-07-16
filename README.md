@@ -256,3 +256,16 @@ Documentation for the API used:
 - Search users:    https://docs.github.com/en/rest/search/search#search-users
 - List user repos: https://docs.github.com/en/rest/repos/repos#list-repositories-for-a-user
 - Get a user:      https://docs.github.com/en/rest/users/users#get-a-user
+
+#### Note on Gist Visibility
+
+GitHub has two types of gists:
+
+| Type | Discoverable | API Accessible | Description |
+|------|--------------|----------------|-------------|
+| **Public** | Yes | Yes | Listed on user's profile, searchable, returned by `GET /users/{login}/gists` |
+| **Secret** | No | No* | Not listed anywhere, only accessible via direct URL |
+
+\* Secret gists are not truly private — anyone with the URL can view them. However, the API endpoint `GET /users/{login}/gists` only returns **public gists**. Secret gists cannot be discovered through the API without knowing the exact gist ID.
+
+This means if a user has secret gists, they will **not** appear in the script's output.
