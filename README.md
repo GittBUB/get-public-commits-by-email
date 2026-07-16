@@ -1,9 +1,5 @@
 # Identify Public Activities by Email
 
-This repo contains the following scripts:
-
----
-
 ## Setting Up a Personal Access Token (PAT)
 
 Both scripts authenticate to the GitHub API using a **classic Personal Access Token (PAT)**. Fine-grained tokens are not recommended here because these scripts search across all of public GitHub rather than a specific set of repositories.
